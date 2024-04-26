@@ -1,16 +1,5 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Apr 16 13:42:21 2024
-
-@author: 29803
-"""
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Jan  7 16:58:14 2024
-screen -S Rayleigh_RIS_chen -dm python Run.py
-screen -r Rayleigh_RIS_chen
-screen -S 2x2_Rayleigh_01 -dm python Run.py
-screen -r 2x2_Rayleigh_01
 @author: LRAY
 """
 from generator import EncoderModel,DecoderModel
@@ -97,9 +86,7 @@ chencoder = precoding_2x2((Tn+(Tn*Rn))*2,Tn*2)
 
 def init_weights(m):
     if isinstance(m, nn.Linear):
-        # 使用正态分布初始化权重，均值为0，标准差为0.1
         nn.init.normal_(m.weight, mean=0, std=0.1)
-        # 使用常数初始化偏置为0
         nn.init.constant_(m.bias, 0)
 
 Enc.apply(init_weights)
@@ -431,7 +418,7 @@ for epoch in range(1, epochs + 1):
             
         else:
             no_improvement_count += 1
-            if no_improvement_count >= 2:  # 如果连续3个epoch都没有改善，则减半学习率
+            if no_improvement_count >= 2: 
                 for param_group in optEnc.param_groups:
                     param_group['lr'] *= 0.8
                 for param_group in optDec.param_groups:
@@ -441,47 +428,40 @@ for epoch in range(1, epochs + 1):
                 # for param_group in optchen.param_groups:
                 #     param_group['lr'] *= 0.5
                 print("Learning rate halved due to no improvement in validation performance.")
-                no_improvement_count = 0  # 重置连续没有改善的次数
-
-
-# 绘制PESQ与训练次数的对比
+                no_improvement_count = 0  
 
 fig, axes = plt.subplots(3, 1, figsize=(10, 15))
 
-# 在第一个子图中绘制PESQ得分变化曲线
+
 axes[0].plot(epochs_pesq, pesq_scores, label='PESQ Scores', color='blue', marker='+')
 axes[0].set_xlabel('Epoches')
 axes[0].set_ylabel('PESQ Score')
 axes[0].legend()
 axes[0].grid(True)
-# 显示最大值和最小值
+
 axes[0].text(0.5, 0.5, f'Max: {max(pesq_scores):.6f}\nMin: {min(pesq_scores):.6f}', transform=axes[0].transAxes, fontsize=10, verticalalignment='top')
 
-# 在第二个子图中绘制REC得分变化曲线
+
 axes[1].plot(epochs_list, rec_scores, label='REC Scores', color='green', marker='+')
 axes[1].set_xlabel('Epoches')
 axes[1].set_ylabel('REC Score')
 axes[1].legend()
 axes[1].grid(True)
-# 显示最大值和最小值
+
 axes[1].text(0.5, 0.5, f'Max: {max(rec_scores):.6f}\nMin: {min(rec_scores):.6f}', transform=axes[1].transAxes, fontsize=10, verticalalignment='top')
 
-# 在第三个子图中绘制MSE得分变化曲线
 axes[2].plot(epochs_list, mse_scores, label='MSE Scores', color='red', marker='+')
 axes[2].set_xlabel('Epoches')
 axes[2].set_ylabel('MSE Score')
 axes[2].legend()
 axes[2].grid(True)
-# 显示最大值和最小值
+
 axes[2].text(0.5, 0.5, f'Max: {max(mse_scores):.6f}\nMin: {min(mse_scores):.6f}', transform=axes[2].transAxes, fontsize=10, verticalalignment='top')
 
-# 调整布局
+
 plt.tight_layout()
 
-# 显示图表
 # plt.show()
-
-
 
 plt.savefig('2x2_N_16_Rayleigh_01.pdf')
         
