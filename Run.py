@@ -103,12 +103,11 @@ epochs = 500
 # path = '1x2_N_5_5'
 
 def spectral_reconstruction_loss(x, G_x):
+    
     s=[2**i for i in range(5,11)]
     hop=[2**i//4 for i in range(5,11)]
-
     stftloss = MultiResolutionSTFTLoss(fft_sizes=s,hop_sizes=hop,win_lengths=s,factor_sc=1, factor_mag=1).to(device)
     loss = stftloss(G_x.squeeze(1),x.squeeze(1))
-        
     return loss
 
 import matplotlib.pyplot as plt
