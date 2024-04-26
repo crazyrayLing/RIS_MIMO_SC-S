@@ -32,8 +32,8 @@ from RISmodel import RISModel,precoding_2x2,precoding_4x2
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
-input_data1 = np.load('input_data_16khz_clean_trainset_28spk_wav_1w.npy')#
-test_data = np.load('test_data_16khz.npy')
+input_data1 = np.load('path to your speech dataset for train')#
+test_data = np.load('path to your speech dataset for test')
 # (828470, 512)
 print(input_data1.shape)
 
