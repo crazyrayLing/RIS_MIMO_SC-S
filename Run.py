@@ -7,54 +7,56 @@ from generator import EncoderModel,DecoderModel
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader
 import random
-# import yaml
 import numpy as np
-import time
-import argparse
-from pathlib import Path
 import soundfile as sf
-
+import matplotlib.pyplot as plt
 from stft_loss import MultiResolutionSTFTLoss
 from spec_loss import MultiResolutionLoss
 from tqdm import tqdm
 import pesq
 import multiprocessing
 from Generate_channel import generate_rayleigh_channel,generate_rician_channel
-from RISmodel import RISModel,precoding_2x2,precoding_4x2
-# from torch.multiprocessing import set_start_method
-# set_start_method('fork')
+from RISmodel import RISModel,precoding_2x2,precoding_3x2
 
 
-
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
-input_data1 = np.load('path to your speech dataset for train')#
-test_data = np.load('path to your speech dataset for test')
+input_data1 = np.load('input_data_16khz_clean_trainset_28spk_wav_1w.npy')#
+test_data = np.load('test_data_16khz.npy')
 # (828470, 512)
 print(input_data1.shape)
 
 input_dataset = input_data1[0:63875]
-input_dataset = input_dataset /(2**15)
-test_data = test_data[0:2400]
-test_data = test_data/(2**15)
-test_data = test_data.reshape(-1)
-test_data =test_data[0:1920*3600]
-test_data = test_data.reshape(-1,9600)
-batch_size = 64
-input_data = input_dataset.reshape(-1)
-input_data = input_data[0:39490*9600]
-input_data = input_data.reshape(-1,9600)
-num_workers = multiprocessing.cpu_count()  
 
-train_loader = DataLoader(input_data, batch_size=batch_size,num_workers=num_workers)
-#####load train dataset
+input_dataset = input_dataset /(2**15)
+
+test_data = test_data[0:2400]
+
+test_data = test_data/(2**15)
+
+test_data = test_data.reshape(-1)
+
+test_data =test_data[0:1920*3600]
+
+test_data = test_data.reshape(-1,9600)
+
+batch_size = 64
+
+input_data = input_dataset.reshape(-1)
+
+input_data = input_data[0:39490*9600]
+
+input_data = input_data.reshape(-1,9600)
+
+
+train_loader = DataLoader(input_data, batch_size=batch_size)
 
 test_loader = DataLoader(test_data, batch_size=32)
-path = '2x2_N_16_Rayleigh_01'
+
+path = '2x2_N_16_rician_256SJY'
 print(path)    
     
 Tn = 2 
@@ -63,11 +65,11 @@ NUM_RIS = 16
 
 CR = 0.4 * 2
 encoder_dim = int(CR * 320)    
-
 Enc =  EncoderModel(encoder_dim=encoder_dim)
 Dec =  DecoderModel(decoder_dim=encoder_dim)
 Rismodel = RISModel(2*(Tn+Rn)*NUM_RIS,NUM_RIS)
-chencoder = precoding_2x2((Tn+(Tn*Rn))*2,Tn*2)
+
+chencoder = precoding_3x2((Tn+(Tn*Rn))*2,Tn*2)
 
 def init_weights(m):
     if isinstance(m, nn.Linear):
@@ -76,8 +78,6 @@ def init_weights(m):
 
 Enc.apply(init_weights)
 Dec.apply(init_weights)
-Rismodel.apply(init_weights)
-chencoder.apply(init_weights)
 
 Enc = Enc.to(device)
 Dec = Dec.to(device)
@@ -91,29 +91,18 @@ optchen = torch.optim.Adam(chencoder.parameters(), lr=1e-4, betas=(0.5, 0.9))
 
 epochs = 500
 
-# Enc.load_state_dict(torch.load(f"{path}/SEAEnc.pt", map_location=torch.device('cpu')))
-# Dec.load_state_dict(torch.load(f"{path}/SEADec.pt", map_location=torch.device('cpu')))
-# Rismodel.load_state_dict(torch.load(f"{path}/Rismodel.pt", map_location=torch.device('cpu')))
-# chencoder.load_state_dict(torch.load(f"{path}/chencoder.pt", map_location=torch.device('cpu')))
-# optEnc.load_state_dict(torch.load(f"{path}/SEAoptEnc.pt", map_location=torch.device('cpu')))
-# optDec.load_state_dict(torch.load(f"{path}/SEAoptDec.pt", map_location=torch.device('cpu')))
-# optRis.load_state_dict(torch.load(f"{path}/optRis.pt", map_location=torch.device('cpu')))
-# optchen.load_state_dict(torch.load(f"{path}/optchen.pt", map_location=torch.device('cpu')))
-# print("load successfully!")
-# path = '1x2_N_5_5'
 
 def spectral_reconstruction_loss(x, G_x):
-    
     s=[2**i for i in range(5,11)]
     hop=[2**i//4 for i in range(5,11)]
+
     stftloss = MultiResolutionSTFTLoss(fft_sizes=s,hop_sizes=hop,win_lengths=s,factor_sc=1, factor_mag=1).to(device)
     loss = stftloss(G_x.squeeze(1),x.squeeze(1))
     return loss
 
-import matplotlib.pyplot as plt
-import librosa.display
 
 def generate_and_save_images(predictions,epoch, test_input,rec_loss,mse_loss,snr):
+
     test_input = test_input.cpu().numpy().reshape(-1)
     predictions = predictions.cpu().numpy().reshape(-1)   
     plt.figure(figsize=(12, 6))  
@@ -127,22 +116,30 @@ def generate_and_save_images(predictions,epoch, test_input,rec_loss,mse_loss,snr
     print(np.mean(np.square(test_input - predictions)))
     return predictions,test_input
     
+    
+
 WINDOW_LENGTH = 1024
 HOP_LENGTH = 256
+
 no_improvement_count = 0
+
 epochs_list = []
 epochs_pesq = []
 pesq_scores = []
 rec_scores = []
 mse_scores = []
+
 best_pesq_score = float('-inf')  # 初始化最佳PESQ分数
+
 for epoch in range(1, epochs + 1):
     
     Enc.train()
     Dec.train()
     Rismodel.train()
     chencoder.train()
+    
     print(epoch)
+
     rec_mean=0.0
     mse_loss_mean = 0.0
     iterno = 0
@@ -150,80 +147,69 @@ for epoch in range(1, epochs + 1):
     commit_loss = 0
 
     for itern, x_t in tqdm(enumerate(train_loader), total=len(train_loader)):
+        
         iterno = itern
+        
         sample = int(len(x_t.view(-1)) * CR  // (2*2))
-        # print(sample)
-        H2,H3,H2_complex,H3_complex = generate_rayleigh_channel(sample,Tn,Rn,NUM_RIS)
+        
+        
+        H2,H3,H2_complex,H3_complex = generate_rician_channel(sample,Tn,Rn,NUM_RIS)
+        
         H2 = H2.view(sample,-1)
+         
         H3 = H3.view(sample,-1)
+        
         H_concat = torch.cat((H2, H3), dim=1)
-        # print("H_concat",H_concat.shape)
+        
         Theta = Rismodel(H_concat) * torch.pi * 2
-        # print("Theta",Theta.shape)
-        # print("Theta",Theta[-1])
+
         complex_exp_theta = torch.complex(torch.cos(Theta), torch.sin(Theta))
-        # print("complex_exp_theta",complex_exp_theta[-1])
-        # print("complex_exp_theta",complex_exp_theta.shape)
+
         reflection_matrix = torch.diag_embed(complex_exp_theta)
-        # print("diagonal_matrix",reflection_matrix.shape)
-        # print("reflection_matrix",reflection_matrix[-1])
+        
         x_t = x_t.to(device, dtype=torch.float32)
         x_t = x_t.unsqueeze(1)
-        # print("x_t",x_t.shape)
+
         raw = random.randint(-10, 10)*2
         snr = torch.tensor(10**(raw / 10))
         std = torch.sqrt(torch.tensor(1 / (2*snr))).to(device)
         noise = std*torch.randn(sample,Rn,1,2).to(device)  # 将张量移动到GPU
         noise_complex = noise[..., 0] + 1j * noise[..., 1]
+        
+        
+        
         token_origin = Enc(x_t.to(device))
         a,b,c = token_origin.shape
         token = token_origin.view(a,-1,2)
-        # print('x_normalizedx',x_normalized[-1])
-        # print('x_normalizedx',x_normalized.shape)
-        # print('H2_complex',H2_complex.shape)
-        # print('H3_complex',H3_complex.shape)
+
         H3_complex_conj = torch.conj(H3_complex.permute(0, 2, 1))
         H_eff =  H3_complex_conj @ reflection_matrix @ H2_complex
-        # print('H_eff',H_eff.shape)
+
         H_eff_ri = torch.cat((H_eff.real, H_eff.imag), dim=2)
-        # print('H_eff_ri',H_eff_ri.shape)
+
         H_eff_ri = H_eff_ri.view(sample,-1)
         token = token.view(-1,4)
-        # print("token",token.shape)
-        # token = torch.cat([token, token], dim=1)
-        # print("token",token.shape)
-        # print("token",token[-1])
-        # print("H_eff_ri",H_eff_ri.shape)
-        # print('x_normalized',x_normalized.shape)
+
+        
         concatenated_tensor = torch.cat((H_eff_ri, token), dim=1)
-        # print('concatenated_tensor',concatenated_tensor.shape)
+
         x_hat = chencoder(concatenated_tensor)
-        # print(x_hat.shape)
+        
+        
         x_normalized = x_hat.view(a,-1,2)
-        # print('x_normalized',x_normalized.shape)
         x_normalized = torch.nn.functional.normalize(x_normalized, p=2, dim=1) * torch.sqrt(torch.tensor(b*c//2 /2.0))
-        # print('x_normalized',x_normalized.shape)
         complex_x = torch.complex(x_normalized[:, :, 0], x_normalized[:, :,1])
         complex_x = complex_x.view(-1,Tn,1)
-        # complex_x = torch.cat([complex_x, complex_x], dim=1)
-        # print('complex_x',complex_x.shape)
-        # print('noise_complex',noise_complex.shape)
 
         y = H_eff @ complex_x + noise_complex
-        # print('noise_complex',noise_complex.shape)
-        # print('y',y.shape)
-        # H_eff_conj = torch.conj(H_eff.permute(0, 2, 1))  
-        # H_eff_pseudo_inverse = torch.matmul(torch.inverse(torch.matmul(H_eff_conj, H_eff)), H_eff_conj)
-        # x_equ = torch.matmul(H_eff_pseudo_inverse, y)
-        # # x_equ = torch.matmul(S_inv_complex,torch.matmul(U_conj_transpose,y))
-        # # print('x_equ',x_equ[-1])
-        y = torch.cat((y.real, y.imag), dim=2)
-        # print('x_equ',x_equ[-1])
-        # print('x_equ',x_equ.shape)
-        x_equ = y.view(a,b,c)
-        # print('x_equ',x_equ.shape)     
-        x_pred_t = Dec(x_equ.to(device))
 
+        y = torch.cat((y.real, y.imag), dim=2)
+
+        x_equ = y.view(a,b,c)
+   
+        x_pred_t = Dec(x_equ.to(device))
+        
+        
         # reconstruction_loss
         
         rec_loss = spectral_reconstruction_loss(x_t,x_pred_t)
@@ -247,21 +233,26 @@ for epoch in range(1, epochs + 1):
     rec_scores.append(rec_mean)
     print("rec_meanloss {:.8f}".format(rec_mean))
     mse_loss_mean = mse_loss_mean/(iterno+1)
-    
     mse_scores.append(mse_loss_mean)
-    # print("rec_loss {:.8f}".format(rec_loss))
+
     print("mse_loss {:.8f}".format(mse_loss_mean))
 
     epochs_list.append(epoch)
     
     test_frequency = 5 if epoch > 250 else 10
+
+    
     if epoch % test_frequency == 0 or epoch == 1:
+        
         pesq_score_total = 0
+        
         with torch.no_grad():
+        
             for iterno, x_t in enumerate(test_loader):
+                
                 sample = int(len(x_t.view(-1)) * CR  // (2*2))
                 # print(sample)
-                H2,H3,H2_complex,H3_complex = generate_rayleigh_channel(sample,Tn,Rn,NUM_RIS)
+                H2,H3,H2_complex,H3_complex = generate_rician_channel(sample,Tn,Rn,NUM_RIS)
                 H2 = H2.view(sample,-1)
                 H3 = H3.view(sample,-1)
                 H_concat = torch.cat((H2, H3), dim=1)
@@ -342,52 +333,55 @@ for epoch in range(1, epochs + 1):
             
         else:
             no_improvement_count += 1
-            if no_improvement_count >= 2: 
+            if no_improvement_count >= 2:  # 如果连续3个epoch都没有改善，则减半学习率
                 for param_group in optEnc.param_groups:
-                    param_group['lr'] *= 0.8
+                    param_group['lr'] *= 0.5
                 for param_group in optDec.param_groups:
-                    param_group['lr'] *= 0.8
-                # for param_group in optRis.param_groups:
-                #     param_group['lr'] *= 0.5
-                # for param_group in optchen.param_groups:
-                #     param_group['lr'] *= 0.5
+                    param_group['lr'] *= 0.5
+                for param_group in optRis.param_groups:
+                    param_group['lr'] *= 0.5
+                for param_group in optchen.param_groups:
+                    param_group['lr'] *= 0.5
                 print("Learning rate halved due to no improvement in validation performance.")
-                no_improvement_count = 0  
-
-fig, axes = plt.subplots(3, 1, figsize=(10, 15))
+                no_improvement_count = 0  # 重置连续没有改善的次数
 
 
-axes[0].plot(epochs_pesq, pesq_scores, label='PESQ Scores', color='blue', marker='+')
-axes[0].set_xlabel('Epoches')
-axes[0].set_ylabel('PESQ Score')
-axes[0].legend()
-axes[0].grid(True)
-
-axes[0].text(0.5, 0.5, f'Max: {max(pesq_scores):.6f}\nMin: {min(pesq_scores):.6f}', transform=axes[0].transAxes, fontsize=10, verticalalignment='top')
 
 
-axes[1].plot(epochs_list, rec_scores, label='REC Scores', color='green', marker='+')
-axes[1].set_xlabel('Epoches')
-axes[1].set_ylabel('REC Score')
-axes[1].legend()
-axes[1].grid(True)
-
-axes[1].text(0.5, 0.5, f'Max: {max(rec_scores):.6f}\nMin: {min(rec_scores):.6f}', transform=axes[1].transAxes, fontsize=10, verticalalignment='top')
-
-axes[2].plot(epochs_list, mse_scores, label='MSE Scores', color='red', marker='+')
-axes[2].set_xlabel('Epoches')
-axes[2].set_ylabel('MSE Score')
-axes[2].legend()
-axes[2].grid(True)
-
-axes[2].text(0.5, 0.5, f'Max: {max(mse_scores):.6f}\nMin: {min(mse_scores):.6f}', transform=axes[2].transAxes, fontsize=10, verticalalignment='top')
+# fig, axes = plt.subplots(3, 1, figsize=(10, 15))
 
 
-plt.tight_layout()
+# axes[0].plot(epochs_pesq, pesq_scores, label='PESQ Scores', color='blue', marker='+')
+# axes[0].set_xlabel('Epoches')
+# axes[0].set_ylabel('PESQ Score')
+# axes[0].legend()
+# axes[0].grid(True)
 
-# plt.show()
+# axes[0].text(0.5, 0.5, f'Max: {max(pesq_scores):.6f}\nMin: {min(pesq_scores):.6f}', transform=axes[0].transAxes, fontsize=10, verticalalignment='top')
 
-plt.savefig('2x2_N_16_Rayleigh_01.pdf')
+
+# axes[1].plot(epochs_list, rec_scores, label='REC Scores', color='green', marker='+')
+# axes[1].set_xlabel('Epoches')
+# axes[1].set_ylabel('REC Score')
+# axes[1].legend()
+# axes[1].grid(True)
+
+# axes[1].text(0.5, 0.5, f'Max: {max(rec_scores):.6f}\nMin: {min(rec_scores):.6f}', transform=axes[1].transAxes, fontsize=10, verticalalignment='top')
+
+# axes[2].plot(epochs_list, mse_scores, label='MSE Scores', color='red', marker='+')
+# axes[2].set_xlabel('Epoches')
+# axes[2].set_ylabel('MSE Score')
+# axes[2].legend()
+# axes[2].grid(True)
+
+# axes[2].text(0.5, 0.5, f'Max: {max(mse_scores):.6f}\nMin: {min(mse_scores):.6f}', transform=axes[2].transAxes, fontsize=10, verticalalignment='top')
+
+
+# plt.tight_layout()
+
+# # plt.show()
+
+# plt.savefig('2x2_N_16_rician_256SJY.pdf')
         
 
 
